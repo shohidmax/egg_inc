@@ -1,0 +1,935 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Incubator Pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <script>
+        tailwind.config = { darkMode: 'class', }
+    </script>
+    <script>
+        if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.documentElement.classList.add('dark')
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; transition: background-color 0.3s, color 0.3s; }
+        .glass { background: rgba(255, 255, 255, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(0,0,0,0.1); box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
+        .dark .glass { background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(255,255,255,0.1); box-shadow: none; }
+        .text-gradient { background: linear-gradient(to right, #3b82f6, #10b981); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+        .dark .text-gradient { background: linear-gradient(to right, #60a5fa, #34d399); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+        .log-entry { font-family: 'Courier New', Courier, monospace; font-size: 11px; margin-bottom: 2px; }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        .dark .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; }
+    </style>
+</head>
+<body class="min-h-screen p-4 md:p-8 bg-slate-50 text-slate-800 dark:bg-slate-900 dark:text-slate-100 transition-colors duration-300">
+    <div class="max-w-6xl mx-auto">
+        <!-- Header Section -->
+        <header class="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
+            <div>
+                <h1 class="text-3xl font-bold text-gradient">Smart Incubator v1.2</h1>
+                <div class="flex flex-wrap items-center gap-2 mt-2">
+                    <div class="flex items-center gap-1.5 px-2 py-1 rounded border border-slate-200 dark:border-slate-700/50 bg-white/50 dark:bg-slate-800/50 text-xs text-slate-500">
+                        <span id="conn-status" class="w-1.5 h-1.5 rounded-full bg-red-500"></span>
+                        <span id="status-text">Server: Disconnected</span>
+                    </div>
+                    <div id="hw-badge" class="flex items-center gap-1.5 px-2 py-1 rounded border border-slate-200 dark:border-slate-700/50 bg-white/50 dark:bg-slate-800/50 text-xs text-slate-500 transition-colors">
+                        <i data-lucide="cpu" id="hw-icon" class="w-3 h-3 text-slate-400"></i>
+                        <span id="hw-status">Hardware: Offline</span>
+                    </div>
+                    <div id="wifi-badge" class="hidden items-center gap-1.5 px-2 py-1 rounded border border-slate-200 dark:border-slate-700/50 bg-white/50 dark:bg-slate-800/50 text-xs text-slate-500 transition-colors">
+                        <i data-lucide="wifi" id="wifi-icon" class="w-3 h-3 text-slate-400"></i>
+                        <span id="wifi-text">--</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="flex items-center gap-4 w-full md:w-auto">
+                <div class="flex flex-col items-end gap-2 w-full md:w-auto">
+                    <div class="flex gap-2 w-full">
+                        <input type="text" id="server-ip-input" placeholder="Server IP (e.g. localhost)" class="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-1 text-sm font-mono text-blue-600 dark:text-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-500 w-full transition-colors">
+                        <button onclick="updateServerIP()" class="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-4 py-1 rounded-lg transition-all">CONNECT</button>
+                    </div>
+                    <div class="text-[10px] text-slate-500 uppercase tracking-widest">
+                        Current: <span id="current-target" class="text-slate-600 dark:text-slate-300">none</span>
+                    </div>
+                </div>
+                <button onclick="toggleTheme()" class="p-2 rounded-full hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors border border-slate-200 dark:border-slate-700">
+                    <i data-lucide="moon" id="theme-icon" class="w-4 h-4 text-slate-600 dark:text-slate-300"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- Primary Stats Card -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+            <div class="glass p-6 rounded-2xl">
+                <div class="flex justify-between items-start mb-4">
+                    <i data-lucide="thermometer" class="text-orange-400"></i>
+                    <span class="text-xs font-bold text-slate-500 uppercase">Avg Temp</span>
+                </div>
+                <div class="flex items-baseline gap-1">
+                    <span id="avg-temp" class="text-4xl font-bold">--.-</span><span class="text-slate-500">°C</span>
+                </div>
+            </div>
+
+            <div class="glass p-6 rounded-2xl">
+                <div class="flex justify-between items-start mb-4">
+                    <i data-lucide="droplets" class="text-blue-400"></i>
+                    <span class="text-xs font-bold text-slate-500 uppercase">Humidity</span>
+                </div>
+                <div class="flex items-baseline gap-1">
+                    <span id="humidity" class="text-4xl font-bold">--</span><span class="text-slate-500">%</span>
+                </div>
+            </div>
+
+            <div class="glass p-6 rounded-2xl border-l-4 border-emerald-500">
+                <div class="flex justify-between items-start mb-4">
+                    <i data-lucide="wind" class="text-emerald-400"></i>
+                    <span class="text-xs font-bold text-slate-500 uppercase">Air Quality Index</span>
+                </div>
+                <div class="flex items-baseline gap-1">
+                    <span id="aqi" class="text-4xl font-bold">--</span><span class="text-slate-500">AQI</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Project & Settings Panel -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            <!-- Active Project Card -->
+            <div class="glass p-6 rounded-2xl border-l-4 border-indigo-500 relative overflow-hidden flex flex-col justify-between">
+                <div class="flex justify-between items-start mb-4">
+                    <h2 class="text-xs font-bold text-slate-500 uppercase flex items-center gap-2">
+                        <i data-lucide="calendar-clock" class="w-4 h-4 text-indigo-400"></i> Incubation Project
+                    </h2>
+                    <span id="proj-badge" class="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-200 text-slate-500 dark:bg-slate-700 dark:text-slate-400">IDLE</span>
+                </div>
+                
+                <div id="proj-idle-view" class="block mt-auto pb-2">
+                    <p class="text-xs text-slate-500 dark:text-slate-400 mb-3">No active project running. Select a standard profile to begin.</p>
+                    <div class="flex gap-2">
+                        <select id="profile-select" class="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-700 dark:text-slate-300 w-full focus:outline-none focus:ring-1 focus:ring-indigo-500 transition-colors">
+                            <option value="">Loading profiles...</option>
+                        </select>
+                        <button onclick="startProject()" class="bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold px-4 py-2 rounded-lg transition-all flex items-center gap-2">
+                            <i data-lucide="play" class="w-4 h-4"></i> START
+                        </button>
+                        <button onclick="openProfileModal()" class="bg-slate-200 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 p-2 rounded-lg transition-all" title="Manage Profiles">
+                            <i data-lucide="settings-2" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <div id="proj-active-view" class="hidden mt-auto">
+                    <h3 id="proj-name" class="text-xl font-bold text-indigo-600 dark:text-indigo-400 mb-1">--</h3>
+                    <div class="flex items-baseline gap-2 mb-4">
+                        <span class="text-2xl font-bold" id="proj-day">Day --</span>
+                        <span class="text-sm text-slate-500">running</span>
+                    </div>
+                    <div class="flex justify-between items-center bg-slate-100/50 dark:bg-slate-800/50 p-3 rounded-xl mb-4">
+                        <div class="text-center">
+                            <p class="text-[10px] text-slate-500 font-bold uppercase">Target Temp</p>
+                            <p class="font-bold text-orange-500" id="proj-temp">--°C</p>
+                        </div>
+                        <div class="text-center">
+                            <p class="text-[10px] text-slate-500 font-bold uppercase">Target Hum</p>
+                            <p class="font-bold text-blue-500" id="proj-hum">--%</p>
+                        </div>
+                        <div class="text-center">
+                            <p class="text-[10px] text-slate-500 font-bold uppercase">Tray Interval</p>
+                            <p class="font-bold text-purple-500" id="proj-tray">--</p>
+                        </div>
+                    </div>
+                    <button onclick="stopProject()" class="text-xs text-red-500 hover:text-red-700 font-bold flex items-center gap-1 bg-red-100 dark:bg-red-500/20 px-3 py-1.5 rounded w-fit">
+                        <i data-lucide="square" class="w-3 h-3"></i> Stop Project
+                    </button>
+                </div>
+            </div>
+
+            <!-- Manual Settings -->
+            <div class="glass p-6 rounded-2xl flex flex-col justify-between">
+                <div>
+                    <h2 class="text-xs font-bold text-slate-500 uppercase mb-4 flex items-center gap-2">
+                        <i data-lucide="sliders" class="w-4 h-4 text-emerald-400"></i> Manual Targets
+                    </h2>
+                    <div class="grid grid-cols-2 gap-4 mb-2">
+                        <div>
+                            <label class="text-[10px] text-slate-500 uppercase tracking-widest pl-1 mb-1 block">Target Temp (°C)</label>
+                            <input type="number" step="0.1" id="set-target-temp" class="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-700 dark:text-slate-300 w-full focus:outline-none focus:ring-1 focus:ring-emerald-500 transition-colors" value="37.5">
+                        </div>
+                        <div>
+                            <label class="text-[10px] text-slate-500 uppercase tracking-widest pl-1 mb-1 block">Target Hum (%)</label>
+                            <input type="number" step="1" id="set-target-hum" class="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-700 dark:text-slate-300 w-full focus:outline-none focus:ring-1 focus:ring-emerald-500 transition-colors" value="65">
+                        </div>
+                    </div>
+                </div>
+                <div>
+                    <div class="flex justify-end gap-3 text-xs mt-4 items-center">
+                        <span id="settings-status" class="text-emerald-500 font-bold tracking-wider hidden">SAVED!</span>
+                        <button onclick="saveSettings()" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-5 py-2 rounded-lg transition-all flex items-center gap-1 w-fit">
+                            <i data-lucide="save" class="w-4 h-4"></i> APPLY
+                        </button>
+                    </div>
+                    <p class="text-[10px] text-slate-400 dark:text-slate-500 mt-3 italic">*Manual settings are overridden if an Incubation Project is actively running.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- System Controls & Probes -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+            <div class="glass p-6 rounded-2xl">
+                <h2 class="text-xs font-bold text-slate-500 uppercase mb-4 flex items-center gap-2">
+                    <i data-lucide="thermometer-snowflake" class="w-4 h-4"></i> Internal Dallas Probes
+                </h2>
+                <div class="grid grid-cols-3 gap-4 text-center">
+                    <div class="p-2 rounded-lg bg-slate-200/60 dark:bg-slate-900/30">
+                        <p class="text-[10px] text-slate-500">PROBE 1</p>
+                        <p id="dallas-1" class="text-xl font-bold text-orange-400">--</p>
+                    </div>
+                    <div class="p-2 rounded-lg bg-slate-200/60 dark:bg-slate-900/30">
+                        <p class="text-[10px] text-slate-500">PROBE 2</p>
+                        <p id="dallas-2" class="text-xl font-bold text-orange-400">--</p>
+                    </div>
+                    <div class="p-2 rounded-lg bg-slate-200/60 dark:bg-slate-900/30">
+                        <p class="text-[10px] text-slate-500">PROBE 3</p>
+                        <p id="dallas-3" class="text-xl font-bold text-orange-400">--</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- System Controls -->
+            <div class="glass p-6 rounded-2xl flex justify-around items-center flex-wrap gap-4">
+                <div id="ind-heater" onclick="toggleOverride('heater')" class="text-center transition-all duration-300 cursor-pointer hover:scale-105 relative">
+                    <div class="w-12 h-12 rounded-full flex items-center justify-center mb-2 bg-slate-100 dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 transition-colors mx-auto">
+                        <i data-lucide="flame" class="w-6 h-6 text-slate-400 dark:text-slate-600"></i>
+                    </div>
+                    <p class="text-[10px] font-bold">HEATER</p>
+                    <p id="ovr-heater" class="text-[9px] mt-0.5 font-bold text-slate-400 dark:text-slate-500 tracking-wider">AUTO</p>
+                </div>
+                <div id="ind-fogger" onclick="toggleOverride('fogger')" class="text-center transition-all duration-300 cursor-pointer hover:scale-105 relative">
+                    <div class="w-12 h-12 rounded-full flex items-center justify-center mb-2 bg-slate-100 dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 transition-colors mx-auto">
+                        <i data-lucide="cloud-rain" class="w-6 h-6 text-slate-400 dark:text-slate-600"></i>
+                    </div>
+                    <p class="text-[10px] font-bold">FOGGER</p>
+                    <p id="ovr-fogger" class="text-[9px] mt-0.5 font-bold text-slate-400 dark:text-slate-500 tracking-wider">AUTO</p>
+                </div>
+                <div id="ind-tray" onclick="toggleOverride('tray')" class="text-center transition-all duration-300 cursor-pointer hover:scale-105 relative">
+                    <div class="w-12 h-12 rounded-full flex items-center justify-center mb-2 bg-slate-100 dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 transition-colors mx-auto">
+                        <i data-lucide="refresh-cw" class="w-6 h-6 text-slate-400 dark:text-slate-600"></i>
+                    </div>
+                    <p class="text-[10px] font-bold">TRAY</p>
+                    <p id="ovr-tray" class="text-[9px] mt-0.5 font-bold text-slate-400 dark:text-slate-500 tracking-wider transition-colors">AUTO</p>
+                </div>
+                <div id="ind-buzzer" onclick="toggleOverride('buzzer')" class="text-center transition-all duration-300 cursor-pointer hover:scale-105 relative">
+                    <div class="w-12 h-12 rounded-full flex items-center justify-center mb-2 bg-slate-100 dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 transition-colors mx-auto">
+                        <i data-lucide="bell" class="w-6 h-6 text-slate-400 dark:text-slate-600"></i>
+                    </div>
+                    <p class="text-[10px] font-bold">BUZZER</p>
+                    <p id="ovr-buzzer" class="text-[9px] mt-0.5 font-bold text-slate-400 dark:text-slate-500 tracking-wider transition-colors">AUTO</p>
+                </div>
+            </div>
+
+            <!-- Environment Quick Info -->
+            <div class="glass p-6 rounded-2xl">
+                <h2 class="text-xs font-bold text-slate-500 uppercase mb-4 flex items-center gap-2">
+                    <i data-lucide="cpu" class="w-4 h-4 text-purple-400"></i> External DHT22 Sensor
+                </h2>
+                <div class="grid grid-cols-2 gap-4 text-center h-[calc(100%-2rem)] items-center">
+                    <div class="p-3 rounded-xl bg-slate-200/50 dark:bg-slate-900/40 border border-slate-300 dark:border-slate-700/50">
+                        <p class="text-[10px] text-slate-500 dark:text-slate-400 mb-1 font-bold tracking-wider">TEMP</p>
+                        <div class="flex items-baseline justify-center gap-1">
+                            <span id="dht-temp" class="text-2xl font-bold text-purple-500 dark:text-purple-400">--.-</span><span class="text-slate-500 text-xs">°C</span>
+                        </div>
+                    </div>
+                    <div class="p-3 rounded-xl bg-slate-200/50 dark:bg-slate-900/40 border border-slate-300 dark:border-slate-700/50">
+                        <p class="text-[10px] text-slate-500 dark:text-slate-400 mb-1 font-bold tracking-wider">HUMIDITY</p>
+                        <div class="flex items-baseline justify-center gap-1">
+                            <span id="dht-hum" class="text-2xl font-bold text-blue-500 dark:text-blue-400">--</span><span class="text-slate-500 text-xs">%</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Historical Data Log -->
+        <div class="glass p-6 rounded-2xl mb-8">
+            <h2 class="text-xs font-bold text-slate-500 uppercase mb-4 flex justify-between items-center">
+                <div class="flex items-center gap-2"><i data-lucide="history" class="w-4 h-4 text-indigo-500 dark:text-indigo-400"></i> Historical Data Log</div>
+            </h2>
+            <div class="flex flex-col md:flex-row gap-4 mb-4">
+                <div class="flex flex-col">
+                    <label class="text-[10px] text-slate-500 uppercase tracking-widest pl-1 mb-1">Start Time</label>
+                    <input type="datetime-local" id="filter-start" class="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-1 focus:ring-blue-500 w-full md:w-auto transition-colors">
+                </div>
+                <div class="flex flex-col">
+                    <label class="text-[10px] text-slate-500 uppercase tracking-widest pl-1 mb-1">End Time</label>
+                    <input type="datetime-local" id="filter-end" class="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-1 focus:ring-blue-500 w-full md:w-auto transition-colors">
+                </div>
+                <div class="flex flex-col justify-end">
+                    <button onclick="fetchHistory()" class="bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold px-6 py-2 rounded-lg transition-all h-[38px]">Apply Filter</button>
+                </div>
+                <div class="flex flex-col justify-end">
+                    <button onclick="downloadPDF()" id="pdf-btn" disabled class="bg-slate-200 dark:bg-slate-700 text-slate-400 text-sm font-bold px-6 py-2 rounded-lg transition-all h-[38px] cursor-not-allowed">Download PDF</button>
+                </div>
+            </div>
+            <div class="overflow-x-auto rounded-xl border border-slate-300 dark:border-slate-700/50 custom-scrollbar max-h-64">
+                <table class="w-full text-left border-collapse text-sm">
+                    <thead class="sticky top-0 bg-slate-100 dark:bg-slate-800 z-10 border-b border-slate-300 dark:border-slate-700/50">
+                        <tr class="text-slate-600 dark:text-slate-400">
+                            <th class="p-3 font-semibold">Timestamp</th>
+                            <th class="p-3 font-semibold text-orange-600 dark:text-orange-400/80">Avg Temp (°C)</th>
+                            <th class="p-3 font-semibold text-purple-600 dark:text-purple-400/80">DHT Temp (°C)</th>
+                            <th class="p-3 font-semibold text-blue-600 dark:text-blue-400/80">Humidity (%)</th>
+                            <th class="p-3 font-semibold text-emerald-600 dark:text-emerald-400/80">AQI</th>
+                        </tr>
+                    </thead>
+                    <tbody id="history-table-body" class="divide-y divide-slate-200 dark:divide-slate-700/50 text-slate-700 dark:text-slate-300 bg-white/50 dark:bg-slate-900/40">
+                        <tr><td colspan="5" class="p-6 text-center text-slate-500 italic">Click 'Apply Filter' to load historical data.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Debug Console -->
+        <div class="glass p-4 rounded-xl border-t-2 border-t-blue-500/30">
+            <div class="flex justify-between items-center mb-2">
+                <h3 class="text-[10px] font-bold text-slate-500 uppercase">Connection Logs</h3>
+                <button onclick="clearLogs()" class="text-[9px] text-slate-500 hover:text-slate-700 dark:text-slate-600 dark:hover:text-slate-400 uppercase font-bold">Clear</button>
+            </div>
+            <div id="debug-logs" class="max-h-32 overflow-y-auto pr-2 custom-scrollbar">
+                <div class="log-entry text-slate-500">System initializing...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Profile Management Modal -->
+    <div id="profile-modal" class="fixed inset-0 z-50 bg-black/50 hidden flex-col items-center justify-center backdrop-blur-sm p-4 text-slate-800 dark:text-slate-100">
+        <div class="bg-white dark:bg-slate-900 w-full max-w-2xl rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800 flex flex-col max-h-[90vh]">
+            <div class="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center">
+                <h2 class="text-lg font-bold" id="modal-title">Manage Profiles</h2>
+                <button onclick="closeProfileModal()" class="text-slate-400 hover:text-red-500"><i data-lucide="x" class="w-5 h-5"></i></button>
+            </div>
+            
+            <!-- List View -->
+            <div id="pm-list-view" class="p-6 overflow-y-auto">
+                <button onclick="openProfileEditor()" class="w-full bg-indigo-50 border border-indigo-200 dark:bg-indigo-900/20 dark:border-indigo-800 text-indigo-600 dark:text-indigo-400 font-bold py-3 rounded-xl mb-4 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors flex items-center justify-center gap-2">
+                    <i data-lucide="plus" class="w-4 h-4"></i> CREATE NEW PROFILE
+                </button>
+                <div id="pm-profile-list" class="space-y-3"></div>
+            </div>
+
+            <!-- Edit View -->
+            <div id="pm-edit-view" class="p-6 hidden flex-col overflow-y-auto w-full">
+                <div class="grid grid-cols-2 gap-4 mb-4">
+                    <div>
+                        <label class="text-xs font-bold text-slate-500 mb-1 block">Profile ID (e.g. pigeon_1)</label>
+                        <input type="text" id="pe-id" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm">
+                    </div>
+                    <div>
+                        <label class="text-xs font-bold text-slate-500 mb-1 block">Display Name</label>
+                        <input type="text" id="pe-name" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm">
+                    </div>
+                </div>
+                <div class="mb-4">
+                    <label class="text-xs font-bold text-slate-500 mb-1 block">Total Incubation Days</label>
+                    <input type="number" id="pe-days" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm">
+                </div>
+                
+                <div class="mb-2 flex justify-between items-end">
+                    <label class="text-xs font-bold text-slate-500 block">Incubation Stages</label>
+                    <button onclick="addStageRow()" class="text-xs text-indigo-500 font-bold flex items-center gap-1"><i data-lucide="plus-circle" class="w-3 h-3"></i> Add Stage</button>
+                </div>
+                
+                <div class="bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700 p-4 mb-4">
+                    <div id="pe-stages-container" class="space-y-3"></div>
+                </div>
+                
+                <div class="flex justify-end gap-3 mt-auto pt-4 border-t border-slate-200 dark:border-slate-700/50">
+                    <button onclick="closeProfileEditor()" class="px-4 py-2 text-sm font-bold text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">Cancel</button>
+                    <button onclick="saveProfile()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-2 rounded-lg text-sm font-bold shadow">Save Profile</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        lucide.createIcons();
+        
+        let socket;
+        let currentIP = localStorage.getItem('incubator_ip') || 'localhost';
+        document.getElementById('server-ip-input').value = currentIP;
+
+        function addLog(msg, color = 'text-slate-500') {
+            const container = document.getElementById('debug-logs');
+            const time = new Date().toLocaleTimeString();
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${color}`;
+            entry.innerHTML = `<span>[${time}]</span> ${msg}`;
+            container.prepend(entry);
+        }
+
+        function clearLogs() {
+            document.getElementById('debug-logs').innerHTML = '';
+        }
+
+        function initSocket(ip) {
+            if (socket) {
+                socket.off();
+                socket.disconnect();
+            }
+            
+            const url = `http://${ip}:3000`;
+            document.getElementById('current-target').innerText = url;
+            addLog(`Attempting connection to ${url}...`, 'text-blue-400');
+            
+            socket = io(url, {
+                timeout: 5000,
+                reconnectionAttempts: 5,
+                transports: ['websocket', 'polling']
+            });
+
+            socket.on('connect', () => {
+                document.getElementById('conn-status').className = 'w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]';
+                document.getElementById('status-text').innerText = 'Server: Connected';
+                addLog('Socket connected successfully!', 'text-emerald-400');
+                fetchProfiles();
+            });
+
+            socket.on('connect_error', (err) => {
+                document.getElementById('conn-status').className = 'w-1.5 h-1.5 rounded-full bg-red-500';
+                document.getElementById('status-text').innerText = 'Server: Error';
+                addLog(`Connection Error: ${err.message}`, 'text-red-400');
+            });
+
+            socket.on('telemetry', (data) => {
+                if (data.device) {
+                    const hwBadge = document.getElementById('hw-badge');
+                    const hwIcon = document.getElementById('hw-icon');
+                    const hwStatus = document.getElementById('hw-status');
+                    const wifiBadge = document.getElementById('wifi-badge');
+                    
+                    if (data.device.online) {
+                        hwStatus.innerText = 'Hardware: Online';
+                        hwBadge.classList.add('border-emerald-200', 'dark:border-emerald-900/50', 'bg-emerald-50', 'dark:bg-emerald-900/20');
+                        hwBadge.classList.remove('border-slate-200', 'dark:border-slate-700/50', 'bg-white/50', 'dark:bg-slate-800/50');
+                        hwIcon.classList.replace('text-slate-400', 'text-emerald-500');
+                        hwIcon.classList.replace('text-red-500', 'text-emerald-500');
+
+                        wifiBadge.classList.remove('hidden');
+                        wifiBadge.classList.add('flex');
+                        document.getElementById('wifi-text').innerText = `${data.device.ssid} (${data.device.rssi}dBm) • IP: ${data.device.ip || '--'}`;
+                        
+                        let sigColor = 'text-red-500';
+                        if (data.device.rssi > -60) sigColor = 'text-emerald-500';
+                        else if (data.device.rssi > -70) sigColor = 'text-emerald-400';
+                        else if (data.device.rssi > -80) sigColor = 'text-yellow-500';
+                        else sigColor = 'text-orange-500';
+                        document.getElementById('wifi-icon').className = `w-3 h-3 ${sigColor}`;
+                    } else {
+                        hwStatus.innerText = 'Hardware: Offline';
+                        hwBadge.classList.remove('border-emerald-200', 'dark:border-emerald-900/50', 'bg-emerald-50', 'dark:bg-emerald-900/20');
+                        hwBadge.classList.add('border-slate-200', 'dark:border-slate-700/50', 'bg-white/50', 'dark:bg-slate-800/50');
+                        hwIcon.classList.replace('text-emerald-500', 'text-red-500');
+                        hwIcon.classList.replace('text-slate-400', 'text-red-500');
+                        
+                        wifiBadge.classList.remove('flex');
+                        wifiBadge.classList.add('hidden');
+                    }
+                }
+
+                if (data.avgTemp !== undefined) document.getElementById('avg-temp').innerText = data.avgTemp.toFixed(1);
+                if (data.humidity !== undefined) {
+                    document.getElementById('humidity').innerText = data.humidity.toFixed(0);
+                    const dhtHumEl = document.getElementById('dht-hum');
+                    if (dhtHumEl) dhtHumEl.innerText = data.humidity.toFixed(0);
+                }
+                if (data.dhtTemp !== undefined) {
+                    const dhtTempEl = document.getElementById('dht-temp');
+                    if (dhtTempEl) dhtTempEl.innerText = data.dhtTemp.toFixed(1);
+                }
+
+                if (data.airQuality !== undefined || data.aqi !== undefined) {
+                    document.getElementById('aqi').innerText = (data.aqi || data.airQuality).toFixed(0);
+                }
+
+                if (data.dallas && Array.isArray(data.dallas)) {
+                    if (data.dallas[0] !== undefined) document.getElementById('dallas-1').innerText = data.dallas[0].toFixed(1);
+                    if (data.dallas[1] !== undefined) document.getElementById('dallas-2').innerText = data.dallas[1].toFixed(1);
+                    if (data.dallas[2] !== undefined) document.getElementById('dallas-3').innerText = data.dallas[2].toFixed(1);
+                }
+
+                if (data.overrides) {
+                    localOverrides = data.overrides;
+                    updateOverrideUI('ovr-heater', data.overrides.heater);
+                    updateOverrideUI('ovr-fogger', data.overrides.fogger);
+                    updateOverrideUI('ovr-tray', data.overrides.tray);
+                    updateOverrideUI('ovr-buzzer', data.overrides.buzzer);
+                }
+
+                if (data.relays) {
+                    window.lastRelayData = data.relays;
+                    updateActuatorStatus('ind-heater', data.relays.heater, '#fb923c');
+                    updateActuatorStatus('ind-fogger', data.relays.fogger, '#3b82f6');
+                    updateActuatorStatus('ind-tray', data.relays.tray, '#a855f7');
+                }
+
+                if (data.config && (!data.project || !data.project.active)) {
+                    // Update manual inputs only if user is not actively typing (would need blur handling in production, but okay for now)
+                    if (document.activeElement.id !== 'set-target-temp') document.getElementById('set-target-temp').value = data.config.targetTemp;
+                    if (document.activeElement.id !== 'set-target-hum') document.getElementById('set-target-hum').value = data.config.targetHum;
+                }
+
+                if (data.project) {
+                    const badge = document.getElementById('proj-badge');
+                    const idleView = document.getElementById('proj-idle-view');
+                    const activeView = document.getElementById('proj-active-view');
+                    
+                    if (data.project.active) {
+                        badge.innerText = 'RUNNING';
+                        badge.className = 'px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500 text-white shadow-[0_0_8px_rgba(99,102,241,0.6)] animate-pulse';
+                        idleView.classList.add('hidden');
+                        activeView.classList.remove('hidden');
+                        
+                        document.getElementById('proj-day').innerText = `Day ${data.project.currentDay || 1}`;
+                        if (data.config) {
+                            document.getElementById('proj-temp').innerText = `${data.config.targetTemp}°C`;
+                            document.getElementById('proj-hum').innerText = `${data.config.targetHum}%`;
+                            let tText = 'OFF';
+                            if (data.config.trayDuration > 0) {
+                                if (data.config.trayInterval < 999999999) {
+                                    tText = (data.config.trayInterval / 3600000) + 'h (' + (data.config.trayDuration / 60000) + 'm)';
+                                } else {
+                                    tText = 'ON (Auto)';
+                                }
+                            }
+                            document.getElementById('proj-tray').innerText = tText;
+                        }
+                        
+                        if (window.loadedProfiles && window.loadedProfiles[data.project.profileId]) {
+                            document.getElementById('proj-name').innerText = window.loadedProfiles[data.project.profileId].name;
+                        }
+                    } else {
+                        badge.innerText = 'IDLE';
+                        badge.className = 'px-2 py-0.5 rounded text-[10px] font-bold bg-slate-200 text-slate-500 dark:bg-slate-700 dark:text-slate-400';
+                        idleView.classList.remove('hidden');
+                        activeView.classList.add('hidden');
+                    }
+                }
+            });
+        }
+
+        let localOverrides = { heater: -1, fogger: -1, tray: -1, buzzer: -1 };
+
+        async function toggleOverride(relay) {
+            let current = localOverrides[relay];
+            if (current === -1) localOverrides[relay] = 1;
+            else if (current === 1) localOverrides[relay] = 0;
+            else localOverrides[relay] = -1;
+
+            const payload = {};
+            payload[relay] = localOverrides[relay];
+            
+            updateOverrideUI('ovr-' + relay, localOverrides[relay]);
+
+            try {
+                const ip = document.getElementById('server-ip-input').value.trim() || 'localhost';
+                await fetch(`http://${ip}:3000/api/override`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                addLog(`Cmd ${relay.toUpperCase()}: ${localOverrides[relay]===1?'ON':localOverrides[relay]===0?'OFF':'AUTO'}`, 'text-blue-400');
+            } catch (err) {
+                addLog(`Cmd failed: ${err.message}`, 'text-red-400');
+            }
+        }
+
+        function updateOverrideUI(elementId, state) {
+            const el = document.getElementById(elementId);
+            if (!el) return;
+            if (state === -1) { el.innerText = 'AUTO'; el.className = 'text-[9px] mt-0.5 font-bold text-slate-400 dark:text-slate-500 tracking-wider transition-colors'; }
+            else if (state === 1) { el.innerText = 'FORCE ON'; el.className = 'text-[9px] mt-0.5 font-bold text-emerald-500 tracking-wider transition-colors'; }
+            else if (state === 0) { el.innerText = 'FORCE OFF'; el.className = 'text-[9px] mt-0.5 font-bold text-red-500 tracking-wider transition-colors'; }
+        }
+
+        function toggleTheme() {
+            const html = document.documentElement;
+            const isDark = html.classList.contains('dark');
+            const icon = document.getElementById('theme-icon');
+            
+            if (isDark) {
+                html.classList.remove('dark');
+                localStorage.theme = 'light';
+                if(icon) icon.setAttribute('data-lucide', 'moon');
+            } else {
+                html.classList.add('dark');
+                localStorage.theme = 'dark';
+                if(icon) icon.setAttribute('data-lucide', 'sun');
+            }
+            lucide.createIcons();
+            
+            if (window.lastRelayData) {
+                updateActuatorStatus('ind-heater', window.lastRelayData.heater, '#fb923c');
+                updateActuatorStatus('ind-fogger', window.lastRelayData.fogger, '#3b82f6');
+                updateActuatorStatus('ind-tray', window.lastRelayData.tray, '#a855f7');
+            }
+        }
+
+        function updateServerIP() {
+            const newIP = document.getElementById('server-ip-input').value.trim();
+            if (newIP) {
+                localStorage.setItem('incubator_ip', newIP);
+                initSocket(newIP);
+            }
+        }
+
+        function updateActuatorStatus(elementId, isActive, activeColor) {
+            const container = document.getElementById(elementId);
+            if (!container) return; // Safety check
+
+            const iconCircle = container.querySelector('div');
+            // Lucide replaces <i> with <svg>, so we must check for both
+            const icon = container.querySelector('i') || container.querySelector('svg');
+            
+            if (!iconCircle || !icon) return; // Safety check
+            
+            const isDark = document.documentElement.classList.contains('dark');
+
+            if (isActive) {
+                iconCircle.style.borderColor = activeColor;
+                iconCircle.style.backgroundColor = `${activeColor}20`; 
+                icon.style.color = activeColor;
+                container.style.opacity = "1";
+            } else {
+                iconCircle.style.borderColor = isDark ? "#334155" : "#e2e8f0";
+                iconCircle.style.backgroundColor = isDark ? "#1e293b" : "#f1f5f9";
+                icon.style.color = isDark ? "#475569" : "#94a3b8";
+                container.style.opacity = "0.5";
+            }
+        }
+
+        async function fetchProfiles() {
+            try {
+                const ip = document.getElementById('server-ip-input').value.trim() || 'localhost';
+                const res = await fetch(`http://${ip}:3000/api/project/profiles`);
+                const profiles = await res.json();
+                window.loadedProfiles = profiles;
+                
+                const select = document.getElementById('profile-select');
+                select.innerHTML = '<option value="" disabled selected>-- Select an Incubation Profile --</option>';
+                for (const [key, p] of Object.entries(profiles)) {
+                    select.innerHTML += `<option value="${key}">${p.name}</option>`;
+                }
+                renderProfileManagerList();
+            } catch (err) {
+                addLog(`Profiles Error: ${err.message}`, 'text-red-400');
+            }
+        }
+
+        // --- Profile Management Modal Logic ---
+        function openProfileModal() {
+            document.getElementById('profile-modal').style.display = 'flex';
+            document.getElementById('pm-list-view').classList.remove('hidden');
+            document.getElementById('pm-edit-view').classList.add('hidden');
+            document.getElementById('profile-modal').classList.remove('hidden');
+            document.getElementById('modal-title').innerText = 'Manage Profiles';
+        }
+
+        function closeProfileModal() {
+            document.getElementById('profile-modal').style.display = 'none';
+        }
+
+        function renderProfileManagerList() {
+            const list = document.getElementById('pm-profile-list');
+            list.innerHTML = '';
+            for (const [key, p] of Object.entries(window.loadedProfiles || {})) {
+                list.innerHTML += `
+                    <div class="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl">
+                        <div>
+                            <h4 class="font-bold text-sm">${p.name}</h4>
+                            <p class="text-xs text-slate-500">${p.days} Days • ${p.stages?.length || 0} Stages</p>
+                        </div>
+                        <div class="flex gap-2">
+                            <button onclick="openProfileEditor('${key}')" class="p-2 text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors"><i data-lucide="edit" class="w-4 h-4"></i></button>
+                            <button onclick="deleteProfile('${key}')" class="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                        </div>
+                    </div>
+                `;
+            }
+            lucide.createIcons();
+        }
+
+        function openProfileEditor(profileId = null) {
+            document.getElementById('pm-list-view').classList.add('hidden');
+            document.getElementById('pm-edit-view').classList.replace('hidden', 'flex');
+            document.getElementById('modal-title').innerText = profileId ? 'Edit Profile' : 'Create Profile';
+            
+            const container = document.getElementById('pe-stages-container');
+            container.innerHTML = '';
+            
+            if (profileId && window.loadedProfiles[profileId]) {
+                const p = window.loadedProfiles[profileId];
+                document.getElementById('pe-id').value = p.id;
+                document.getElementById('pe-id').disabled = true; // Disable ID edit
+                document.getElementById('pe-name').value = p.name;
+                document.getElementById('pe-days').value = p.days;
+                p.stages.forEach(s => addStageRow(s));
+            } else {
+                document.getElementById('pe-id').value = '';
+                document.getElementById('pe-id').disabled = false;
+                document.getElementById('pe-name').value = '';
+                document.getElementById('pe-days').value = '21';
+                addStageRow({startDay: 1, endDay: 21, temp: 37.5, hum: 60, trayON: true});
+            }
+        }
+
+        function closeProfileEditor() {
+            document.getElementById('pm-list-view').classList.remove('hidden');
+            document.getElementById('pm-edit-view').classList.replace('flex', 'hidden');
+            document.getElementById('modal-title').innerText = 'Manage Profiles';
+        }
+
+        function addStageRow(stage = {startDay: 1, endDay: 1, temp: 37.5, hum: 60, trayON: true, trayInterval: 4, trayDuration: 10}) {
+            if (stage.trayInterval === undefined) stage.trayInterval = 4;
+            if (stage.trayDuration === undefined) stage.trayDuration = 10;
+            const container = document.getElementById('pe-stages-container');
+            const div = document.createElement('div');
+            div.className = "flex flex-wrap md:flex-nowrap gap-2 items-end stage-row p-2 bg-white dark:bg-slate-900 rounded border border-slate-200 dark:border-slate-800";
+            div.innerHTML = `
+                <div class="flex-1 min-w-[50px]"><label class="text-[9px] text-slate-400">Day (Start)</label><input type="number" class="w-full rounded border px-2 py-1 text-sm bg-slate-50 dark:bg-slate-800 border-slate-300 dark:border-slate-700 st-start" value="${stage.startDay}"></div>
+                <div class="flex-1 min-w-[50px]"><label class="text-[9px] text-slate-400">Day (End)</label><input type="number" class="w-full rounded border px-2 py-1 text-sm bg-slate-50 dark:bg-slate-800 border-slate-300 dark:border-slate-700 st-end" value="${stage.endDay}"></div>
+                <div class="flex-1 min-w-[50px]"><label class="text-[9px] text-slate-400">Temp °C</label><input type="number" step="0.1" class="w-full rounded border px-2 py-1 text-sm bg-slate-50 dark:bg-slate-800 border-slate-300 dark:border-slate-700 st-temp" value="${stage.temp}"></div>
+                <div class="flex-1 min-w-[50px]"><label class="text-[9px] text-slate-400">Hum %</label><input type="number" class="w-full rounded border px-2 py-1 text-sm bg-slate-50 dark:bg-slate-800 border-slate-300 dark:border-slate-700 st-hum" value="${stage.hum}"></div>
+                <div class="flex-1 min-w-[50px]"><label class="text-[9px] text-slate-400">Tray ON?</label>
+                   <select class="w-full rounded border px-2 py-1 text-sm bg-slate-50 dark:bg-slate-800 border-slate-300 dark:border-slate-700 st-tray" onchange="const d = this.parentElement.nextElementSibling; this.value==='true'?d.classList.remove('opacity-30', 'pointer-events-none'):d.classList.add('opacity-30', 'pointer-events-none')">
+                     <option value="true" ${stage.trayON ? 'selected' : ''}>ON</option>
+                     <option value="false" ${!stage.trayON ? 'selected' : ''}>OFF</option>
+                   </select>
+                </div>
+                <div class="flex-1 min-w-[80px] flex gap-1 ${!stage.trayON ? 'opacity-30 pointer-events-none' : ''}">
+                   <div><label class="text-[9px] text-slate-400">Intrvl (hr)</label><input type="number" class="w-full rounded border px-2 py-1 text-sm bg-slate-50 dark:bg-slate-800 border-slate-300 dark:border-slate-700 st-interval" value="${stage.trayInterval}"></div>
+                   <div><label class="text-[9px] text-slate-400">Dur (min)</label><input type="number" class="w-full rounded border px-2 py-1 text-sm bg-slate-50 dark:bg-slate-800 border-slate-300 dark:border-slate-700 st-duration" value="${stage.trayDuration}"></div>
+                </div>
+                <button onclick="this.parentElement.remove()" class="p-2 mt-4 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded"><i data-lucide="x" class="w-4 h-4"></i></button>
+            `;
+            container.appendChild(div);
+            lucide.createIcons();
+        }
+
+        async function saveProfile() {
+            const id = document.getElementById('pe-id').value.trim();
+            const name = document.getElementById('pe-name').value.trim();
+            const days = parseInt(document.getElementById('pe-days').value);
+            
+            if (!id || !name || !days) return alert("Please fill ID, Name, and Total Days.");
+            
+            const stages = [];
+            document.querySelectorAll('.stage-row').forEach(row => {
+                stages.push({
+                    startDay: parseInt(row.querySelector('.st-start').value),
+                    endDay: parseInt(row.querySelector('.st-end').value),
+                    temp: parseFloat(row.querySelector('.st-temp').value),
+                    hum: parseInt(row.querySelector('.st-hum').value),
+                    trayON: row.querySelector('.st-tray').value === 'true',
+                    trayInterval: parseInt(row.querySelector('.st-interval').value || 4),
+                    trayDuration: parseInt(row.querySelector('.st-duration').value || 10)
+                });
+            });
+            
+            if (stages.length === 0) return alert("Add at least one stage.");
+            
+            try {
+                const ip = document.getElementById('server-ip-input').value.trim() || 'localhost';
+                await fetch(`http://${ip}:3000/api/project/profiles`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id, name, days, stages })
+                });
+                addLog(`Profile '${name}' saved.`, 'text-emerald-400');
+                await fetchProfiles();
+                closeProfileEditor();
+            } catch (err) {
+                alert(`Save failed: ${err.message}`);
+            }
+        }
+
+        async function deleteProfile(id) {
+            if(!confirm(`Are you sure you want to delete profile '${id}'?`)) return;
+            try {
+                const ip = document.getElementById('server-ip-input').value.trim() || 'localhost';
+                await fetch(`http://${ip}:3000/api/project/profiles/${id}`, { method: 'DELETE' });
+                addLog(`Profile '${id}' deleted.`, 'text-orange-400');
+                await fetchProfiles();
+            } catch (err) {
+                alert(`Delete failed: ${err.message}`);
+            }
+        }
+        // --- End Profile Mgmt ---
+
+        async function startProject() {
+            const select = document.getElementById('profile-select');
+            if(!select.value) return alert('Please select a profile first');
+            try {
+                const ip = document.getElementById('server-ip-input').value.trim() || 'localhost';
+                await fetch(`http://${ip}:3000/api/project/start`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ profileId: select.value })
+                });
+                addLog('Project started successfully!', 'text-emerald-400');
+            } catch (err) {
+                addLog(`Start Project Error: ${err.message}`, 'text-red-400');
+            }
+        }
+
+        async function stopProject() {
+            if(!confirm('Are you sure you want to STOP the active project?')) return;
+            try {
+                const ip = document.getElementById('server-ip-input').value.trim() || 'localhost';
+                await fetch(`http://${ip}:3000/api/project/stop`, { method: 'POST' });
+                addLog('Project stopped.', 'text-orange-400');
+            } catch (err) {
+                addLog(`Stop Project Error: ${err.message}`, 'text-red-400');
+            }
+        }
+
+        async function saveSettings() {
+            const t = document.getElementById('set-target-temp').value;
+            const h = document.getElementById('set-target-hum').value;
+            try {
+                const ip = document.getElementById('server-ip-input').value.trim() || 'localhost';
+                await fetch(`http://${ip}:3000/api/settings`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ targetTemp: t, targetHum: h })
+                });
+                document.getElementById('settings-status').classList.remove('hidden');
+                setTimeout(() => document.getElementById('settings-status').classList.add('hidden'), 2000);
+                addLog(`Manual settings updated.`, 'text-emerald-400');
+            } catch (err) {
+                addLog(`Settings Error: ${err.message}`, 'text-red-400');
+            }
+        }
+
+        async function fetchHistory() {
+            const start = document.getElementById('filter-start').value;
+            const end = document.getElementById('filter-end').value;
+            const ip = document.getElementById('server-ip-input').value.trim() || 'localhost';
+            
+            let url = `http://${ip}:3000/api/history`;
+            if (start && end) {
+                const s = new Date(start).toISOString();
+                const e = new Date(end).toISOString();
+                url += `?start=${s}&end=${e}`;
+            }
+
+            try {
+                addLog('Fetching historical data...');
+                const res = await fetch(url);
+                const data = await res.json();
+                renderHistory(data);
+                addLog(`Loaded ${data.length} records.`, 'text-emerald-400');
+            } catch (err) {
+                addLog(`History Fetch Error: ${err.message}`, 'text-red-400');
+            }
+        }
+
+        function renderHistory(data) {
+            const tbody = document.getElementById('history-table-body');
+            const pdfBtn = document.getElementById('pdf-btn');
+            tbody.innerHTML = '';
+            
+            if (!data || data.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="5" class="p-6 text-center text-slate-500 italic">No records found for this time period.</td></tr>`;
+                if(pdfBtn) {
+                    pdfBtn.disabled = true;
+                    pdfBtn.className = "bg-slate-700 text-slate-400 text-sm font-bold px-6 py-2 rounded-lg transition-all h-[38px] cursor-not-allowed";
+                }
+                return;
+            }
+
+            if(pdfBtn) {
+                pdfBtn.disabled = false;
+                pdfBtn.className = "bg-rose-600 hover:bg-rose-500 text-white text-sm font-bold px-6 py-2 rounded-lg transition-all h-[38px] cursor-pointer shadow-[0_0_10px_rgba(225,29,72,0.4)]";
+            }
+
+            data.forEach(log => {
+                const tr = document.createElement('tr');
+                tr.className = "hover:bg-slate-100 dark:hover:bg-slate-800/60 transition-colors";
+                
+                const timeStr = new Date(log.timestamp).toLocaleString();
+                const avgT = log.avgTemp !== undefined ? log.avgTemp.toFixed(1) : '--';
+                const dhtT = log.dhtTemp !== undefined ? log.dhtTemp.toFixed(1) : '--';
+                const hum = log.humidity !== undefined ? log.humidity.toFixed(0) : '--';
+                const aqi = log.airQuality !== undefined ? log.airQuality.toFixed(0) : '--';
+                
+                tr.innerHTML = `
+                    <td class="p-3 text-xs text-slate-500 dark:text-slate-400">${timeStr}</td>
+                    <td class="p-3 text-orange-600 dark:text-orange-400 font-medium">${avgT}</td>
+                    <td class="p-3 text-purple-600 dark:text-purple-400 font-medium">${dhtT}</td>
+                    <td class="p-3 text-blue-600 dark:text-blue-400 font-medium">${hum}</td>
+                    <td class="p-3 text-emerald-600 dark:text-emerald-400 font-medium">${aqi}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function downloadPDF() {
+            const table = document.querySelector('.overflow-x-auto table');
+            if(!table) return;
+            
+            addLog("Generating PDF document...", "text-blue-400");
+            
+            const isDark = document.documentElement.classList.contains('dark');
+            const bgColor = isDark ? '#0f172a' : '#f8fafc';
+            const textColor = isDark ? '#f8fafc' : '#0f172a';
+            
+            const wrapper = document.createElement('div');
+            wrapper.style.padding = '20px';
+            wrapper.style.backgroundColor = bgColor;
+            wrapper.style.color = textColor;
+            wrapper.style.fontFamily = 'Inter, sans-serif';
+            
+            const title = document.createElement('h2');
+            title.innerText = `Incubator History Log (${new Date().toLocaleString()})`;
+            title.style.marginBottom = '20px';
+            title.style.color = isDark ? '#60a5fa' : '#3b82f6';
+            title.style.fontSize = '18px';
+            wrapper.appendChild(title);
+            
+            const clone = table.cloneNode(true);
+            wrapper.appendChild(clone);
+            
+            const opt = {
+                margin:       0.5,
+                filename:     `incubator_history_${new Date().toISOString().slice(0,10)}.pdf`,
+                image:        { type: 'jpeg', quality: 0.98 },
+                html2canvas:  { scale: 2, backgroundColor: bgColor },
+                jsPDF:        { unit: 'in', format: 'letter', orientation: 'portrait' }
+            };
+
+            html2pdf().set(opt).from(wrapper).save().then(() => {
+                addLog("PDF downloaded successfully!", "text-emerald-400");
+            }).catch(err => {
+                addLog(`PDF Gen Error: ${err.message}`, "text-red-400");
+            });
+        }
+
+        // Auto-init on load
+        initSocket(currentIP);
+        if (document.documentElement.classList.contains('dark')) {
+            document.getElementById('theme-icon')?.setAttribute('data-lucide', 'sun');
+        } else {
+            document.getElementById('theme-icon')?.setAttribute('data-lucide', 'moon');
+        }
+        lucide.createIcons();
+    </script>
+</body>
+</html>
